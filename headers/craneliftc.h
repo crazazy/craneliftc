@@ -7,19 +7,6 @@
 #include <stdlib.h>
 #include "craneliftc_extra.h"
 
-typedef enum CCallConv {
-  Fast,
-  Cold,
-  Tail,
-  SystemV,
-  WindowsFastcall,
-  AppleAarch64,
-  Probestack,
-  WasmtimeSystemV,
-  WasmtimeFastcall,
-  WasmtimeAppleAarch64,
-} CCallConv;
-
 typedef enum CType {
   I8,
   I16,
@@ -28,8 +15,6 @@ typedef enum CType {
   I128,
   F32,
   F64,
-  R32,
-  R64,
   I8X8,
   I16X4,
   I32X2,
@@ -46,6 +31,17 @@ typedef enum CType {
   F64X8,
 } CType;
 
+typedef enum CCallConv {
+  Fast,
+  Tail,
+  SystemV,
+  WindowsFastcall,
+  AppleAarch64,
+  Probestack,
+  Winch,
+  PreserveAll,
+} CCallConv;
+
 typedef uint32_t CBlock;
 
 typedef uint32_t CVariable;
@@ -57,15 +53,9 @@ typedef uint32_t CInst;
 typedef enum CTrapCode_Tag {
   StackOverflow,
   HeapOutOfBounds,
-  HeapMisaligned,
-  TableOutOfBounds,
-  IndirectCallToNull,
-  BadSignature,
   IntegerOverflow,
   IntegerDivisionByZero,
   BadConversionToInteger,
-  UnreachableCodeReached,
-  Interrupt,
   User,
 } CTrapCode_Tag;
 
@@ -73,7 +63,7 @@ typedef struct CTrapCode {
   CTrapCode_Tag tag;
   union {
     struct {
-      uint16_t user;
+      uint8_t user;
     };
   };
 } CTrapCode;
@@ -81,6 +71,11 @@ typedef struct CTrapCode {
 typedef int64_t CImm64;
 
 typedef uint32_t CJumpTable;
+
+typedef struct CPair {
+  uint32_t _0;
+  uint32_t _1;
+} CPair;
 
 void cstr_free(char *s);
 
@@ -94,7 +89,7 @@ FunctionBuilder *CL_FunctionBuilder_new(Function *func, FunctionBuilderContext *
 
 CBlock CL_FunctionBuilder_create_block(FunctionBuilder *builder);
 
-void CL_FunctionBuilder_declare_var(FunctionBuilder *builder, CVariable variable, enum CType typ);
+void CL_FunctionBuilder_declare_var(FunctionBuilder *builder, enum CType typ);
 
 void CL_FunctionBuilder_def_var(FunctionBuilder *builder, CVariable variable, CValue val);
 
@@ -147,8 +142,6 @@ CInst CL_FunctionBuilder_nop(FunctionBuilder *builder);
 
 CInst CL_FunctionBuilder_trap(FunctionBuilder *builder, struct CTrapCode code);
 
-CInst CL_FunctionBuilder_resumable_trap(FunctionBuilder *builder, struct CTrapCode code);
-
 CInst CL_FunctionBuilder_trapz(FunctionBuilder *builder, CValue val, struct CTrapCode code);
 
 CInst CL_FunctionBuilder_trapnz(FunctionBuilder *builder, CValue val, struct CTrapCode code);
@@ -175,6 +168,8 @@ CValue CL_FunctionBuilder_fcvt_to_uint(FunctionBuilder *builder, enum CType one,
 
 CValue CL_FunctionBuilder_fcvt_to_sint(FunctionBuilder *builder, enum CType one, CValue val);
 
+CValue CL_FunctionBuilder_fcvt_to_uint_sat(FunctionBuilder *builder, enum CType one, CValue val);
+
 CValue CL_FunctionBuilder_fcvt_to_sint_sat(FunctionBuilder *builder, enum CType one, CValue val);
 
 CValue CL_FunctionBuilder_x86_cvtt2dq(FunctionBuilder *builder, enum CType one, CValue val);
@@ -183,13 +178,9 @@ CValue CL_FunctionBuilder_fcvt_from_uint(FunctionBuilder *builder, enum CType on
 
 CValue CL_FunctionBuilder_fcvt_from_sint(FunctionBuilder *builder, enum CType one, CValue val);
 
-CValue CL_FunctionBuilder_fcvt_low_from_sint(FunctionBuilder *builder, enum CType one, CValue val);
-
 CValue CL_FunctionBuilder_get_stack_pointer(FunctionBuilder *builder, enum CType one);
 
 CValue CL_FunctionBuilder_get_return_address(FunctionBuilder *builder, enum CType one);
-
-CValue CL_FunctionBuilder_null(FunctionBuilder *builder, enum CType one);
 
 CValue CL_FunctionBuilder_iadd_imm(FunctionBuilder *builder, CValue one, CImm64 imm);
 
@@ -202,8 +193,6 @@ CValue CL_FunctionBuilder_sdiv_imm(FunctionBuilder *builder, CValue one, CImm64 
 CValue CL_FunctionBuilder_urem_imm(FunctionBuilder *builder, CValue one, CImm64 imm);
 
 CValue CL_FunctionBuilder_srem_imm(FunctionBuilder *builder, CValue one, CImm64 imm);
-
-CValue CL_FunctionBuilder_irsub_imm(FunctionBuilder *builder, CValue one, CImm64 imm);
 
 CValue CL_FunctionBuilder_band_imm(FunctionBuilder *builder, CValue one, CImm64 imm);
 
@@ -237,13 +226,19 @@ CValue CL_FunctionBuilder_select_spectre_guard(FunctionBuilder *builder,
 
 CValue CL_FunctionBuilder_bitselect(FunctionBuilder *builder, CValue c, CValue left, CValue right);
 
-CValue CL_FunctionBuilder_x86_blendv(FunctionBuilder *builder, CValue c, CValue left, CValue right);
-
-CValue CL_FunctionBuilder_iadd_cin(FunctionBuilder *builder, CValue c, CValue left, CValue right);
-
-CValue CL_FunctionBuilder_isub_bin(FunctionBuilder *builder, CValue c, CValue left, CValue right);
+CValue CL_FunctionBuilder_blendv(FunctionBuilder *builder, CValue c, CValue left, CValue right);
 
 CValue CL_FunctionBuilder_fma(FunctionBuilder *builder, CValue c, CValue left, CValue right);
+
+struct CPair CL_FunctionBuilder_sadd_overflow_cin(FunctionBuilder *builder,
+                                                  CValue c,
+                                                  CValue left,
+                                                  CValue right);
+
+struct CPair CL_FunctionBuilder_uadd_overflow_cin(FunctionBuilder *builder,
+                                                  CValue c,
+                                                  CValue left,
+                                                  CValue right);
 
 CValue CL_FunctionBuilder_iadd(FunctionBuilder *builder, CValue left, CValue right);
 
@@ -323,11 +318,7 @@ CValue CL_FunctionBuilder_fcopysign(FunctionBuilder *builder, CValue left, CValu
 
 CValue CL_FunctionBuilder_fmin(FunctionBuilder *builder, CValue left, CValue right);
 
-CValue CL_FunctionBuilder_fmin_pseudo(FunctionBuilder *builder, CValue left, CValue right);
-
 CValue CL_FunctionBuilder_fmax(FunctionBuilder *builder, CValue left, CValue right);
-
-CValue CL_FunctionBuilder_fmax_pseudo(FunctionBuilder *builder, CValue left, CValue right);
 
 CValue CL_FunctionBuilder_snarrow(FunctionBuilder *builder, CValue left, CValue right);
 
@@ -376,10 +367,6 @@ CValue CL_FunctionBuilder_floor(FunctionBuilder *builder, CValue one);
 CValue CL_FunctionBuilder_trunc(FunctionBuilder *builder, CValue one);
 
 CValue CL_FunctionBuilder_nearest(FunctionBuilder *builder, CValue one);
-
-CValue CL_FunctionBuilder_is_null(FunctionBuilder *builder, CValue one);
-
-CValue CL_FunctionBuilder_is_invalid(FunctionBuilder *builder, CValue one);
 
 CValue CL_FunctionBuilder_swiden_low(FunctionBuilder *builder, CValue one);
 

@@ -222,7 +222,9 @@ Software.
 
 use std::ffi::{c_char, CString};
 
-use cranelift::codegen::ir::{entities::JumpTable, types::*, Function, TrapCode, UserFuncName};
+use cranelift::codegen::ir::{
+    entities::JumpTable, instructions::BlockArg, types::*, Function, TrapCode, UserFuncName,
+};
 use cranelift::codegen::verifier::verify_function;
 use cranelift::prelude::isa::CallConv;
 use cranelift::prelude::settings::{self, Builder, Flags};
@@ -230,21 +232,16 @@ use cranelift::prelude::{
     AbiParam, Block, FunctionBuilder, FunctionBuilderContext, Imm64, InstBuilder, Signature, Value,
     Variable,
 };
+use paste::paste;
 
 #[repr(C)]
 pub enum CTrapCode {
     StackOverflow,
     HeapOutOfBounds,
-    HeapMisaligned,
-    TableOutOfBounds,
-    IndirectCallToNull,
-    BadSignature,
     IntegerOverflow,
     IntegerDivisionByZero,
     BadConversionToInteger,
-    UnreachableCodeReached,
-    Interrupt,
-    User(u16),
+    User(u8),
 }
 
 #[repr(C)]
@@ -256,8 +253,6 @@ pub enum CType {
     I128,
     F32,
     F64,
-    R32,
-    R64,
     I8X8,
     I16X4,
     I32X2,
@@ -288,33 +283,23 @@ pub struct CInst(u32);
 pub struct CFuncRef(u32);
 #[repr(transparent)]
 pub struct CJumpTable(u32);
-
+#[repr(C)]
+pub struct CPair(u32, u32);
 #[repr(C)]
 pub enum CCallConv {
     Fast,
-    Cold,
     Tail,
     SystemV,
     WindowsFastcall,
     AppleAarch64,
     Probestack,
-    WasmtimeSystemV,
-    WasmtimeFastcall,
-    WasmtimeAppleAarch64,
+    Winch,
+    PreserveAll,
 }
 macro_rules! easy_type {
     ($val:ident, $typ:ident, $($variant:ident,)*) => {
         match $val {
             $($typ::$variant => $variant,)*
-        }
-    };
-}
-
-macro_rules! union_enum {
-    ($val:ident, $nl:ident, $nr:ident, $($variant:ident,)*) => {
-        match $val {
-            $($nl::$variant => Some($nr::$variant),)*
-            _ => None
         }
     };
 }
@@ -330,8 +315,8 @@ macro_rules! easy_enum {
 #[allow(non_snake_case)]
 fn convert_CType(td: CType) -> Type {
     return easy_type!(
-        td, CType, I8, I16, I32, I64, I128, F32, F64, R32, R64, I8X8, I16X4, I32X2, F32X2, I8X16,
-        I16X8, I32X4, I64X2, F32X4, F64X2, F32X8, F64X4, F32X16, F64X8,
+        td, CType, I8, I16, I32, I64, I128, F32, F64, I8X8, I16X4, I32X2, F32X2, I8X16, I16X8,
+        I32X4, I64X2, F32X4, F64X2, F32X8, F64X4, F32X16, F64X8,
     );
 }
 
@@ -342,39 +327,42 @@ fn convert_CCallConv(ccd: CCallConv) -> CallConv {
         CCallConv,
         CallConv,
         Fast,
-        Cold,
         Tail,
         SystemV,
         WindowsFastcall,
         AppleAarch64,
         Probestack,
-        WasmtimeSystemV,
-        WasmtimeFastcall,
-        WasmtimeAppleAarch64,
+        Winch,
+        PreserveAll,
     );
+}
+
+macro_rules! union_enum_upcase {
+    ($val:ident, $nl:ident, $nr:ident, $($variant:ident,)*) => {
+        paste! {
+            match $val {
+                $($nl::$variant => Some($nr::[<$variant:snake:upper>]),)*
+                _ => None
+            }
+        }
+    }
 }
 
 #[allow(non_snake_case)]
 fn convert_CTrapCode(ctc: CTrapCode) -> TrapCode {
-    let result = union_enum!(
+    let result = union_enum_upcase!(
         ctc,
         CTrapCode,
         TrapCode,
         StackOverflow,
         HeapOutOfBounds,
-        HeapMisaligned,
-        TableOutOfBounds,
-        IndirectCallToNull,
-        BadSignature,
         IntegerOverflow,
         IntegerDivisionByZero,
         BadConversionToInteger,
-        UnreachableCodeReached,
-        Interrupt,
     );
     if result.is_none() {
         if let CTrapCode::User(x) = ctc {
-            return TrapCode::User(x);
+            return TrapCode::user(x).unwrap();
         } else {
             return result.unwrap();
         }
@@ -461,14 +449,10 @@ pub extern "C" fn CL_FunctionBuilder_create_block(builder: *mut FunctionBuilder)
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn CL_FunctionBuilder_declare_var(
-    builder: *mut FunctionBuilder,
-    variable: CVariable,
-    typ: CType,
-) -> () {
+pub extern "C" fn CL_FunctionBuilder_declare_var(builder: *mut FunctionBuilder, typ: CType) -> () {
     assert!(!builder.is_null());
     let ubuilder = unsafe { &mut *builder };
-    ubuilder.declare_var(Variable::from_u32(variable.0), convert_CType(typ));
+    ubuilder.declare_var(convert_CType(typ));
 }
 
 #[no_mangle]
@@ -656,8 +640,8 @@ macro_rules! instr_five_value_block_svalue_block_svalue_inst {
                 assert!(!builder.is_null());
                 let first = unsafe { core::slice::from_raw_parts(block_one_args, one_len)};
                 let second = unsafe { core::slice::from_raw_parts(block_two_args, two_len)};
-                let converts_one: Vec<Value> = first.into_iter().map(|x| {return Value::from_u32(x.0); }).collect();
-                let converts_two: Vec<Value> = second.into_iter().map(|x| {return Value::from_u32(x.0); }).collect();
+                let converts_one: Vec<BlockArg> = first.into_iter().map(|x| {return BlockArg::Value(Value::from_u32(x.0)); }).collect();
+                let converts_two: Vec<BlockArg> = second.into_iter().map(|x| {return BlockArg::Value(Value::from_u32(x.0)); }).collect();
                 let ubuilder = unsafe { &mut *builder };
                 let cval = Value::from_u32(val.0);
                 let result = ubuilder
@@ -676,7 +660,7 @@ macro_rules! instr_two_block_svalue_inst {
             pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, block_call_label: CBlock, block_call_args: *mut CValue, len: usize) -> CInst {
                 assert!(!builder.is_null());
                 let rvals = unsafe { core::slice::from_raw_parts(block_call_args, len)};
-                let converts: Vec<Value> = rvals.into_iter().map(|x| {return Value::from_u32(x.0); }).collect();
+                let converts: Vec<BlockArg> = rvals.into_iter().map(|x| {return BlockArg::Value(Value::from_u32(x.0)); }).collect();
                 let ubuilder = unsafe { &mut *builder };
                 let result = ubuilder
                     .ins()
@@ -699,6 +683,23 @@ macro_rules! instr_three_value_value_value_value {
                     .ins()
                     .$invoke(Value::from_u32(c.0), Value::from_u32(left.0), Value::from_u32(right.0));
                 CValue(result.as_u32())
+            }
+        }
+    };
+}
+
+macro_rules! instr_three_value_value_value_pair{
+    ($invoke:ident) => {
+        paste::paste! {
+            #[no_mangle]
+            #[allow(non_snake_case)]
+            pub extern "C" fn [< CL_FunctionBuilder_ $invoke >](builder: *mut FunctionBuilder, c: CValue, left: CValue, right: CValue) -> CPair {
+                assert!(!builder.is_null());
+                let ubuilder = unsafe { &mut *builder };
+                let result = ubuilder
+                    .ins()
+                    .$invoke(Value::from_u32(c.0), Value::from_u32(left.0), Value::from_u32(right.0));
+                CPair(result.0.as_u32(), result.1.as_u32())
             }
         }
     };
@@ -920,7 +921,6 @@ instr_zero_inst!(nop);
 
 // (code) -> inst
 instr_one_code_inst!(trap);
-instr_one_code_inst!(resumable_trap);
 
 // (value, code) -> inst
 instr_two_value_code_inst!(trapz);
@@ -942,16 +942,15 @@ instr_two_type_value_value!(fpromote);
 instr_two_type_value_value!(fdemote);
 instr_two_type_value_value!(fcvt_to_uint);
 instr_two_type_value_value!(fcvt_to_sint);
+instr_two_type_value_value!(fcvt_to_uint_sat);
 instr_two_type_value_value!(fcvt_to_sint_sat);
 instr_two_type_value_value!(x86_cvtt2dq);
 instr_two_type_value_value!(fcvt_from_uint);
 instr_two_type_value_value!(fcvt_from_sint);
-instr_two_type_value_value!(fcvt_low_from_sint);
 
 // (type) -> value
 instr_one_type_value!(get_stack_pointer);
 instr_one_type_value!(get_return_address);
-instr_one_type_value!(null);
 
 // (value, imm64) -> value
 instr_two_value_imm_value!(iadd_imm);
@@ -960,7 +959,6 @@ instr_two_value_imm_value!(udiv_imm);
 instr_two_value_imm_value!(sdiv_imm);
 instr_two_value_imm_value!(urem_imm);
 instr_two_value_imm_value!(srem_imm);
-instr_two_value_imm_value!(irsub_imm);
 instr_two_value_imm_value!(band_imm);
 instr_two_value_imm_value!(bor_imm);
 instr_two_value_imm_value!(bxor_imm);
@@ -981,11 +979,13 @@ instr_two_block_svalue_inst!(jump);
 instr_three_value_value_value_value!(select);
 instr_three_value_value_value_value!(select_spectre_guard);
 instr_three_value_value_value_value!(bitselect);
-instr_three_value_value_value_value!(x86_blendv);
-instr_three_value_value_value_value!(iadd_cin);
-instr_three_value_value_value_value!(isub_bin);
+instr_three_value_value_value_value!(blendv);
 instr_three_value_value_value_value!(fma);
 
+// (value, value, value) -> (value, value)
+
+instr_three_value_value_value_pair!(sadd_overflow_cin);
+instr_three_value_value_value_pair!(uadd_overflow_cin);
 // (value, value) -> value
 
 instr_two_value_value_value!(iadd);
@@ -1027,9 +1027,7 @@ instr_two_value_value_value!(fmul);
 instr_two_value_value_value!(fdiv);
 instr_two_value_value_value!(fcopysign);
 instr_two_value_value_value!(fmin);
-instr_two_value_value_value!(fmin_pseudo);
 instr_two_value_value_value!(fmax);
-instr_two_value_value_value!(fmax_pseudo);
 instr_two_value_value_value!(snarrow);
 instr_two_value_value_value!(unarrow);
 instr_two_value_value_value!(uunarrow);
@@ -1056,8 +1054,6 @@ instr_one_value_value!(ceil);
 instr_one_value_value!(floor);
 instr_one_value_value!(trunc);
 instr_one_value_value!(nearest);
-instr_one_value_value!(is_null);
-instr_one_value_value!(is_invalid);
 instr_one_value_value!(swiden_low);
 instr_one_value_value!(uwiden_low);
 instr_one_value_value!(swiden_high);
