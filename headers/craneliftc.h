@@ -79,13 +79,17 @@ typedef struct CPair {
 
 void cstr_free(char *s);
 
+Context *CL_Context_new(void);
+
+void CL_Context_dispose(Context *val);
+
 FunctionBuilderContext *CL_FunctionBuilderContext_new(void);
 
 void CL_FunctionBuilderContext_dispose(FunctionBuilderContext *val);
 
 void CL_FunctionBuilder_dispose(FunctionBuilder *val);
 
-FunctionBuilder *CL_FunctionBuilder_new(Function *func, FunctionBuilderContext *ctx);
+FunctionBuilder *CL_FunctionBuilder_new(Context *ctx, FunctionBuilderContext *fctx);
 
 CBlock CL_FunctionBuilder_create_block(FunctionBuilder *builder);
 

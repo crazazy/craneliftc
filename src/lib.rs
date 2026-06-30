@@ -226,6 +226,7 @@ use cranelift::codegen::ir::{
     entities::JumpTable, instructions::BlockArg, types::*, Function, TrapCode, UserFuncName,
 };
 use cranelift::codegen::verifier::verify_function;
+use cranelift::codegen::Context;
 use cranelift::prelude::isa::CallConv;
 use cranelift::prelude::settings::{self, Builder, Flags};
 use cranelift::prelude::{
@@ -417,6 +418,10 @@ pub extern "C" fn cstr_free(s: *mut c_char) {
     unsafe { drop(CString::from_raw(s)) };
 }
 
+// CONTEXT Does not implement Copy
+namespace_new!(Context);
+empty_dispose!(Context);
+
 // FUNCTIONBUILDERCONTEXT Does not implement Copy
 namespace_new!(FunctionBuilderContext);
 empty_dispose!(FunctionBuilderContext);
@@ -429,14 +434,14 @@ empty_dispose!(FunctionBuilder);
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "C" fn CL_FunctionBuilder_new<'a>(
-    func: *mut Function,
-    ctx: *mut FunctionBuilderContext,
+    ctx: *mut Context,
+    fctx: *mut FunctionBuilderContext,
 ) -> *mut FunctionBuilder<'a> {
-    assert!(!func.is_null());
     assert!(!ctx.is_null());
-    let ufunc = unsafe { &mut *func };
+    assert!(!fctx.is_null());
     let uctx = unsafe { &mut *ctx };
-    return Box::into_raw(Box::new(FunctionBuilder::new(ufunc, uctx)));
+    let ufctx = unsafe { &mut *fctx };
+    return Box::into_raw(Box::new(FunctionBuilder::new(&mut uctx.func, ufctx)));
 }
 
 #[no_mangle]

@@ -1,4 +1,5 @@
 #pragma once
+typedef struct Context Context;
 typedef struct FunctionBuilder FunctionBuilder;
 typedef struct UserFuncName UserFuncName;
 typedef struct Flags Flags;
