@@ -221,6 +221,8 @@ Software.
 */
 
 use std::ffi::{c_char, CStr, CString};
+use std::fs::File;
+use std::io::Write;
 
 use cranelift::codegen::ir::{
     entities::JumpTable, instructions::BlockArg, types::*, Function, TrapCode, UserFuncName,
@@ -1104,4 +1106,18 @@ pub extern "C" fn CL_ObjectModule_new(
         ObjectModule::new(builder)
     };
     return Box::into_raw(Box::new(module));
+}
+
+//This frees the Object Module as well
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_ObjectModule_dump(file: *const c_char, module: *mut ObjectModule) -> () {
+    assert!(!file.is_null());
+    assert!(!module.is_null());
+    let ufilename = unsafe { CStr::from_ptr(file) }.to_str().unwrap();
+    let umodule = unsafe { Box::from_raw(module) };
+    let product = umodule.finish();
+    let bytes = product.emit().unwrap();
+    let mut f = File::create(ufilename).unwrap();
+    f.write_all(&bytes).unwrap();
 }
