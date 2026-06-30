@@ -1088,6 +1088,8 @@ pub extern "C" fn CL_ObjectModule_new(
     target: *const c_char,
     out_name: *const c_char,
 ) -> *mut ObjectModule {
+    assert!(!target.is_null());
+    assert!(!out_name.is_null());
     let target_triple: &CStr = unsafe { CStr::from_ptr(target) };
     let isa = {
         let mut builder = settings::builder();
