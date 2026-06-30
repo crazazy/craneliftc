@@ -9,6 +9,6 @@ name = "craneliftc"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-cranelift = "0"
+cranelift = {version = "0", features = ["module", "object"]}
 paste = "1.0.11"
 

@@ -220,18 +220,19 @@ the License, but only in their entirety and only with respect to the Combined
 Software.
 */
 
-use std::ffi::{c_char, CString};
+use std::ffi::{c_char, CStr, CString};
 
 use cranelift::codegen::ir::{
     entities::JumpTable, instructions::BlockArg, types::*, Function, TrapCode, UserFuncName,
 };
 use cranelift::codegen::verifier::verify_function;
 use cranelift::codegen::Context;
-use cranelift::prelude::isa::CallConv;
+use cranelift::object::{ObjectBuilder, ObjectModule};
+use cranelift::prelude::isa::{self, CallConv};
 use cranelift::prelude::settings::{self, Builder, Flags};
 use cranelift::prelude::{
-    AbiParam, Block, FunctionBuilder, FunctionBuilderContext, Imm64, InstBuilder, Signature, Value,
-    Variable,
+    AbiParam, Block, Configurable, FunctionBuilder, FunctionBuilderContext, Imm64, InstBuilder,
+    Signature, Value, Variable,
 };
 
 #[repr(C)]
@@ -1074,3 +1075,33 @@ instr_one_value_inst!(set_pinned_reg);
 
 // (value, block, svalue, block, svalue) -> inst
 instr_five_value_block_svalue_block_svalue_inst!(brif);
+
+// OBJECT COMPILER
+//
+// Instead of having the user do a bunch of boilerplate in C,
+// we do the setting up the object module so the C side only has to pass a target triple and a output name
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn CL_ObjectModule_new(
+    target: *const c_char,
+    out_name: *const c_char,
+) -> *mut ObjectModule {
+    let target_triple: &CStr = unsafe { CStr::from_ptr(target) };
+    let isa = {
+        let mut builder = settings::builder();
+        builder.enable("is_pic").unwrap();
+        let flags = settings::Flags::new(builder);
+        isa::lookup_by_name(target_triple.to_str().unwrap())
+            .unwrap()
+            .finish(flags)
+            .unwrap()
+    };
+    let module: ObjectModule = {
+        let libcall_names = cranelift::module::default_libcall_names();
+        let translation_unit_name = unsafe { CStr::from_ptr(out_name) }.to_str().unwrap();
+        let builder =
+            ObjectBuilder::new(isa.clone(), translation_unit_name, libcall_names).unwrap();
+        ObjectModule::new(builder)
+    };
+    return Box::into_raw(Box::new(module));
+}

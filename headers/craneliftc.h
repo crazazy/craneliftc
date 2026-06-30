@@ -394,3 +394,5 @@ CInst CL_FunctionBuilder_brif(FunctionBuilder *builder,
                               CBlock block_two_label,
                               CValue *block_two_args,
                               size_t two_len);
+
+ObjectModule *CL_ObjectModule_new(const char *target, const char *out_name);
