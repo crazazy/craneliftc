@@ -93,7 +93,7 @@ FunctionBuilder *CL_FunctionBuilder_new(Context *ctx, FunctionBuilderContext *fc
 
 CBlock CL_FunctionBuilder_create_block(FunctionBuilder *builder);
 
-void CL_FunctionBuilder_declare_var(FunctionBuilder *builder, enum CType typ);
+CVariable CL_FunctionBuilder_declare_var(FunctionBuilder *builder, enum CType typ);
 
 void CL_FunctionBuilder_def_var(FunctionBuilder *builder, CVariable variable, CValue val);
 

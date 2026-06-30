@@ -234,7 +234,6 @@ use cranelift::prelude::{
     Variable,
 };
 
-
 #[repr(C)]
 pub enum CTrapCode {
     StackOverflow,
@@ -454,10 +453,14 @@ pub extern "C" fn CL_FunctionBuilder_create_block(builder: *mut FunctionBuilder)
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn CL_FunctionBuilder_declare_var(builder: *mut FunctionBuilder, typ: CType) -> () {
+pub extern "C" fn CL_FunctionBuilder_declare_var(
+    builder: *mut FunctionBuilder,
+    typ: CType,
+) -> CVariable {
     assert!(!builder.is_null());
     let ubuilder = unsafe { &mut *builder };
-    ubuilder.declare_var(convert_CType(typ));
+    let var = ubuilder.declare_var(convert_CType(typ));
+    return CVariable(var.as_u32());
 }
 
 #[no_mangle]
