@@ -232,7 +232,7 @@ use cranelift::prelude::{
     AbiParam, Block, FunctionBuilder, FunctionBuilderContext, Imm64, InstBuilder, Signature, Value,
     Variable,
 };
-use paste::paste;
+
 
 #[repr(C)]
 pub enum CTrapCode {
@@ -339,7 +339,7 @@ fn convert_CCallConv(ccd: CCallConv) -> CallConv {
 
 macro_rules! union_enum_upcase {
     ($val:ident, $nl:ident, $nr:ident, $($variant:ident,)*) => {
-        paste! {
+        paste::paste! {
             match $val {
                 $($nl::$variant => Some($nr::[<$variant:snake:upper>]),)*
                 _ => None
